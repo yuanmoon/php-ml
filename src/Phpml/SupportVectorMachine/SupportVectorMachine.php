@@ -4,8 +4,12 @@ declare(strict_types=1);
 
 namespace Phpml\SupportVectorMachine;
 
+use Phpml\Helper\Trainable;
+
 class SupportVectorMachine
 {
+    use Trainable;
+
     /**
      * @var int
      */
@@ -84,7 +88,7 @@ class SupportVectorMachine
     /**
      * @var array
      */
-    private $labels;
+    private $targets = [];
 
     /**
      * @param int        $type
@@ -125,13 +129,39 @@ class SupportVectorMachine
     }
 
     /**
-     * @param array $samples
-     * @param array $labels
+     * @param string $binPath
+     *
+     * @return $this
      */
-    public function train(array $samples, array $labels)
+    public function setBinPath(string $binPath)
     {
-        $this->labels = $labels;
-        $trainingSet = DataTransformer::trainingSet($samples, $labels, in_array($this->type, [Type::EPSILON_SVR, Type::NU_SVR]));
+        $this->binPath = $binPath;
+
+        return $this;
+    }
+
+    /**
+     * @param string $varPath
+     *
+     * @return $this
+     */
+    public function setVarPath(string $varPath)
+    {
+        $this->varPath = $varPath;
+
+        return $this;
+    }
+
+    /**
+     * @param array $samples
+     * @param array $targets
+     */
+    public function train(array $samples, array $targets)
+    {
+        $this->samples = array_merge($this->samples, $samples);
+        $this->targets = array_merge($this->targets, $targets);
+
+        $trainingSet = DataTransformer::trainingSet($this->samples, $this->targets, in_array($this->type, [Type::EPSILON_SVR, Type::NU_SVR]));
         file_put_contents($trainingSetFileName = $this->varPath.uniqid('phpml', true), $trainingSet);
         $modelFileName = $trainingSetFileName.'-model';
 
@@ -176,7 +206,7 @@ class SupportVectorMachine
         unlink($outputFileName);
 
         if (in_array($this->type, [Type::C_SVC, Type::NU_SVC])) {
-            $predictions = DataTransformer::predictions($predictions, $this->labels);
+            $predictions = DataTransformer::predictions($predictions, $this->targets);
         } else {
             $predictions = explode(PHP_EOL, trim($predictions));
         }
@@ -204,8 +234,8 @@ class SupportVectorMachine
     }
 
     /**
-     * @param $trainingSetFileName
-     * @param $modelFileName
+     * @param string $trainingSetFileName
+     * @param string $modelFileName
      *
      * @return string
      */

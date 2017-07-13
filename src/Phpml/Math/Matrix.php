@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Phpml\Math;
 
+use Phpml\Math\LinearAlgebra\LUDecomposition;
 use Phpml\Exception\InvalidArgumentException;
 use Phpml\Exception\MatrixException;
 
@@ -37,8 +38,15 @@ class Matrix
      */
     public function __construct(array $matrix, bool $validate = true)
     {
-        $this->rows = count($matrix);
-        $this->columns = count($matrix[0]);
+        // When a row vector is given
+        if (!is_array($matrix[0])) {
+            $this->rows = 1;
+            $this->columns = count($matrix);
+            $matrix = [$matrix];
+        } else {
+            $this->rows = count($matrix);
+            $this->columns = count($matrix[0]);
+        }
 
         if ($validate) {
             for ($i = 0; $i < $this->rows; ++$i) {
@@ -75,6 +83,14 @@ class Matrix
     }
 
     /**
+     * @return float
+     */
+    public function toScalar()
+    {
+        return $this->matrix[0][0];
+    }
+
+    /**
      * @return int
      */
     public function getRows()
@@ -103,13 +119,9 @@ class Matrix
             throw MatrixException::columnOutOfRange();
         }
 
-        $values = [];
-        for ($i = 0; $i < $this->rows; ++$i) {
-            $values[] = $this->matrix[$i][$column];
-        }
-
-        return $values;
+        return array_column($this->matrix, $column);
     }
+
 
     /**
      * @return float|int
@@ -126,32 +138,9 @@ class Matrix
             throw MatrixException::notSquareMatrix();
         }
 
-        return $this->determinant = $this->calculateDeterminant();
-    }
+        $lu = new LUDecomposition($this);
 
-    /**
-     * @return float|int
-     *
-     * @throws MatrixException
-     */
-    private function calculateDeterminant()
-    {
-        $determinant = 0;
-        if ($this->rows == 1 && $this->columns == 1) {
-            $determinant = $this->matrix[0][0];
-        } elseif ($this->rows == 2 && $this->columns == 2) {
-            $determinant =
-                $this->matrix[0][0] * $this->matrix[1][1] -
-                $this->matrix[0][1] * $this->matrix[1][0];
-        } else {
-            for ($j = 0; $j < $this->columns; ++$j) {
-                $subMatrix = $this->crossOut(0, $j);
-                $minor = $this->matrix[0][$j] * $subMatrix->getDeterminant();
-                $determinant += fmod((float) $j, 2.0) == 0 ? $minor : -$minor;
-            }
-        }
-
-        return $determinant;
+        return $this->determinant = $lu->det();
     }
 
     /**
@@ -167,14 +156,15 @@ class Matrix
      */
     public function transpose()
     {
-        $newMatrix = [];
-        for ($i = 0; $i < $this->rows; ++$i) {
-            for ($j = 0; $j < $this->columns; ++$j) {
-                $newMatrix[$j][$i] = $this->matrix[$i][$j];
-            }
+        if ($this->rows == 1) {
+            $matrix = array_map(function ($el) {
+                return [$el];
+            }, $this->matrix[0]);
+        } else {
+            $matrix = array_map(null, ...$this->matrix);
         }
 
-        return new self($newMatrix, false);
+        return new self($matrix, false);
     }
 
     /**
@@ -223,6 +213,70 @@ class Matrix
     }
 
     /**
+     * @param $value
+     *
+     * @return Matrix
+     */
+    public function multiplyByScalar($value)
+    {
+        $newMatrix = [];
+        for ($i = 0; $i < $this->rows; ++$i) {
+            for ($j = 0; $j < $this->columns; ++$j) {
+                $newMatrix[$i][$j] = $this->matrix[$i][$j] * $value;
+            }
+        }
+
+        return new self($newMatrix, false);
+    }
+
+    /**
+     * Element-wise addition of the matrix with another one
+     *
+     * @param Matrix $other
+     *
+     * @return Matrix
+     */
+    public function add(Matrix $other)
+    {
+        return $this->_add($other);
+    }
+
+    /**
+     * Element-wise subtracting of another matrix from this one
+     *
+     * @param Matrix $other
+     *
+     * @return Matrix
+     */
+    public function subtract(Matrix $other)
+    {
+        return $this->_add($other, -1);
+    }
+
+    /**
+     * Element-wise addition or substraction depending on the given sign parameter
+     *
+     * @param Matrix $other
+     * @param int    $sign
+     *
+     * @return Matrix
+     */
+    protected function _add(Matrix $other, $sign = 1)
+    {
+        $a1 = $this->toArray();
+        $a2 = $other->toArray();
+
+        $newMatrix = [];
+        for ($i = 0; $i < $this->rows; ++$i) {
+            for ($k = 0; $k < $this->columns; ++$k) {
+                $newMatrix[$i][$k] = $a1[$i][$k] + $sign * $a2[$i][$k];
+            }
+        }
+
+        return new self($newMatrix, false);
+    }
+
+    /**
      * @return Matrix
      *
      * @throws MatrixException
@@ -233,21 +287,26 @@ class Matrix
             throw MatrixException::notSquareMatrix();
         }
 
-        if ($this->isSingular()) {
-            throw MatrixException::singularMatrix();
-        }
+        $LU = new LUDecomposition($this);
+        $identity = $this->getIdentity();
+        $inverse = $LU->solve($identity);
 
-        $newMatrix = [];
+        return new self($inverse, false);
+    }
+
+    /**
+     * Returns diagonal identity matrix of the same size of this matrix
+     *
+     * @return Matrix
+     */
+    protected function getIdentity()
+    {
+        $array = array_fill(0, $this->rows, array_fill(0, $this->columns, 0));
         for ($i = 0; $i < $this->rows; ++$i) {
-            for ($j = 0; $j < $this->columns; ++$j) {
-                $minor = $this->crossOut($i, $j)->getDeterminant();
-                $newMatrix[$i][$j] = fmod((float) ($i + $j), 2.0) == 0 ? $minor : -$minor;
-            }
+            $array[$i][$i] = 1;
         }
 
-        $cofactorMatrix = new self($newMatrix, false);
-
-        return $cofactorMatrix->transpose()->divideByScalar($this->getDeterminant());
+        return new self($array, false);
     }
 
     /**
@@ -282,5 +341,34 @@ class Matrix
     public function isSingular() : bool
     {
         return 0 == $this->getDeterminant();
+    }
+
+    /**
+     * Returns the transpose of given array
+     *
+     * @param array $array
+     *
+     * @return array
+     */
+    public static function transposeArray(array $array)
+    {
+        return (new self($array, false))->transpose()->toArray();
+    }
+
+    /**
+     * Returns the dot product of two arrays<br>
+     * Matrix::dot(x, y) ==> x.y'
+     *
+     * @param array $array1
+     * @param array $array2
+     *
+     * @return array
+     */
+    public static function dot(array $array1, array $array2)
+    {
+        $m1 = new self($array1, false);
+        $m2 = new self($array2, false);
+
+        return $m1->multiply($m2->transpose())->toArray()[0];
     }
 }
